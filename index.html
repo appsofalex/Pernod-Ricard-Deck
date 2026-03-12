@@ -1,0 +1,327 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Presentation</title>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=DM+Mono:wght@300;400&display=swap');
+
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg: #0a0a0a;
+      --accent: #f0f0f0;
+      --muted: rgba(255,255,255,0.2);
+      --progress-h: 2px;
+    }
+
+    html, body {
+      width: 100%; height: 100%;
+      background: var(--bg);
+      overflow: hidden;
+      font-family: 'DM Mono', monospace;
+      cursor: none;
+    }
+
+    /* ── Slides ── */
+    #stage {
+      position: fixed;
+      inset: 0;
+    }
+
+    .slide {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      opacity: 0;
+      transition: opacity 0.45s cubic-bezier(0.4, 0, 0.2, 1);
+      pointer-events: none;
+    }
+
+    .slide.active {
+      opacity: 1;
+      pointer-events: all;
+    }
+
+    .slide img {
+      width: 100%;
+      height: 100%;
+      object-fit: contain;
+      display: block;
+      user-select: none;
+      -webkit-user-drag: none;
+    }
+
+    /* ── Progress bar ── */
+    #progress-bar {
+      position: fixed;
+      bottom: 0; left: 0;
+      height: var(--progress-h);
+      background: var(--accent);
+      transition: width 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+      z-index: 100;
+    }
+
+    /* ── Slide counter ── */
+    #counter {
+      position: fixed;
+      bottom: 18px;
+      right: 24px;
+      font-size: 10px;
+      letter-spacing: 0.15em;
+      color: var(--muted);
+      z-index: 100;
+      transition: opacity 0.3s;
+      user-select: none;
+    }
+
+    /* ── Nav zones (invisible click areas) ── */
+    #nav-prev, #nav-next {
+      position: fixed;
+      top: 0; bottom: 0;
+      width: 40%;
+      z-index: 50;
+    }
+    #nav-prev { left: 0; }
+    #nav-next { right: 0; }
+
+    /* ── Custom cursor ── */
+    #cursor {
+      position: fixed;
+      width: 8px; height: 8px;
+      background: var(--accent);
+      border-radius: 50%;
+      pointer-events: none;
+      z-index: 9999;
+      transform: translate(-50%, -50%);
+      transition: transform 0.1s, opacity 0.2s, width 0.2s, height 0.2s;
+      mix-blend-mode: difference;
+    }
+
+    #cursor.prev-zone {
+      width: 6px; height: 6px;
+    }
+    #cursor.next-zone {
+      width: 12px; height: 12px;
+    }
+
+    /* ── Loading screen ── */
+    #loader {
+      position: fixed;
+      inset: 0;
+      background: var(--bg);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 1000;
+      transition: opacity 0.6s ease;
+    }
+
+    #loader.hidden {
+      opacity: 0;
+      pointer-events: none;
+    }
+
+    .loader-inner {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 20px;
+    }
+
+    .loader-bar-track {
+      width: 120px;
+      height: 1px;
+      background: rgba(255,255,255,0.1);
+      overflow: hidden;
+    }
+
+    .loader-bar-fill {
+      height: 100%;
+      background: var(--accent);
+      width: 0%;
+      transition: width 0.3s ease;
+    }
+
+    .loader-label {
+      font-size: 9px;
+      letter-spacing: 0.25em;
+      color: var(--muted);
+      text-transform: uppercase;
+    }
+
+    /* ── Keyboard hint (fades after first interaction) ── */
+    #hint {
+      position: fixed;
+      bottom: 18px;
+      left: 50%;
+      transform: translateX(-50%);
+      font-size: 9px;
+      letter-spacing: 0.2em;
+      color: rgba(255,255,255,0.15);
+      z-index: 100;
+      text-transform: uppercase;
+      transition: opacity 1s ease;
+      user-select: none;
+    }
+
+    #hint.hidden { opacity: 0; pointer-events: none; }
+  </style>
+</head>
+<body>
+
+<!-- Loader -->
+<div id="loader">
+  <div class="loader-inner">
+    <div class="loader-bar-track"><div class="loader-bar-fill" id="loader-fill"></div></div>
+    <div class="loader-label">Loading</div>
+  </div>
+</div>
+
+<!-- Custom cursor -->
+<div id="cursor"></div>
+
+<!-- Progress bar -->
+<div id="progress-bar"></div>
+
+<!-- Slide counter -->
+<div id="counter"></div>
+
+<!-- Keyboard hint -->
+<div id="hint">← → to navigate &nbsp;·&nbsp; click to advance</div>
+
+<!-- Nav zones -->
+<div id="nav-prev"></div>
+<div id="nav-next"></div>
+
+<!-- Slide stage -->
+<div id="stage"></div>
+
+<script>
+  // ─────────────────────────────────────────────
+  // CONFIGURATION — edit this array with your
+  // exported WebP/JPG filenames (in order).
+  // Put your image files in the same folder
+  // as this index.html file.
+  // ─────────────────────────────────────────────
+  const SLIDES = [
+    'slide-01.webp',
+    'slide-02.webp',
+    'slide-03.webp',
+    'slide-04.webp',
+    'slide-05.webp',
+    // add more slides here...
+  ];
+  // ─────────────────────────────────────────────
+
+  let current = 0;
+  let hintDismissed = false;
+  const stage = document.getElementById('stage');
+  const counter = document.getElementById('counter');
+  const progressBar = document.getElementById('progress-bar');
+  const loader = document.getElementById('loader');
+  const loaderFill = document.getElementById('loader-fill');
+  const hint = document.getElementById('hint');
+  const cursor = document.getElementById('cursor');
+  const navPrev = document.getElementById('nav-prev');
+  const navNext = document.getElementById('nav-next');
+
+  // Build slides
+  const slideEls = SLIDES.map((src, i) => {
+    const div = document.createElement('div');
+    div.className = 'slide' + (i === 0 ? ' active' : '');
+    const img = document.createElement('img');
+    img.src = src;
+    img.alt = `Slide ${i + 1}`;
+    img.draggable = false;
+    div.appendChild(img);
+    stage.appendChild(div);
+    return div;
+  });
+
+  // Preload all images, show loader progress
+  let loaded = 0;
+  const total = SLIDES.length;
+
+  function onImageLoad() {
+    loaded++;
+    const pct = Math.round((loaded / total) * 100);
+    loaderFill.style.width = pct + '%';
+    if (loaded === total) {
+      setTimeout(() => {
+        loader.classList.add('hidden');
+        updateUI();
+      }, 300);
+    }
+  }
+
+  slideEls.forEach(el => {
+    const img = el.querySelector('img');
+    if (img.complete) { onImageLoad(); }
+    else {
+      img.addEventListener('load', onImageLoad);
+      img.addEventListener('error', onImageLoad); // don't hang on broken images
+    }
+  });
+
+  // Update progress bar and counter
+  function updateUI() {
+    const pct = ((current + 1) / total) * 100;
+    progressBar.style.width = pct + '%';
+    counter.textContent = `${String(current + 1).padStart(2,'0')} / ${String(total).padStart(2,'0')}`;
+  }
+
+  function goTo(index) {
+    if (index < 0 || index >= total) return;
+    slideEls[current].classList.remove('active');
+    current = index;
+    slideEls[current].classList.add('active');
+    updateUI();
+    dismissHint();
+  }
+
+  function next() { goTo(current + 1); }
+  function prev() { goTo(current - 1); }
+
+  function dismissHint() {
+    if (!hintDismissed) {
+      hintDismissed = true;
+      hint.classList.add('hidden');
+    }
+  }
+
+  // Keyboard navigation
+  document.addEventListener('keydown', e => {
+    if (e.key === 'ArrowRight' || e.key === 'ArrowDown' || e.key === ' ') { e.preventDefault(); next(); }
+    if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') { e.preventDefault(); prev(); }
+  });
+
+  // Click navigation
+  navNext.addEventListener('click', next);
+  navPrev.addEventListener('click', prev);
+
+  // Touch/swipe
+  let touchStartX = 0;
+  document.addEventListener('touchstart', e => { touchStartX = e.touches[0].clientX; }, { passive: true });
+  document.addEventListener('touchend', e => {
+    const dx = e.changedTouches[0].clientX - touchStartX;
+    if (Math.abs(dx) > 40) { dx < 0 ? next() : prev(); }
+  });
+
+  // Custom cursor
+  document.addEventListener('mousemove', e => {
+    cursor.style.left = e.clientX + 'px';
+    cursor.style.top = e.clientY + 'px';
+    const zone = e.clientX < window.innerWidth * 0.4 ? 'prev' :
+                 e.clientX > window.innerWidth * 0.6 ? 'next' : '';
+    cursor.className = zone ? zone + '-zone' : '';
+  });
+
+  // Initial UI state
+  updateUI();
+</script>
+</body>
+</html>
